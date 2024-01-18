@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qbittorrentnox.fullname" . }}
+  labels:
+    {{- include "qbittorrentnox.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "qbittorrentnox.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "qbittorrentnox.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "qbittorrentnox.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: torrent-tcp
+              containerPort: 6881
+              protocol: TCP
+            - name: torrent-udp
+              containerPort: 6881
+              protocol: UDP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          env:
+            - name: QBT_EULA
+              value: "accept"
+            - name: QBT_VERSION
+              value: "latest"
+            - name: QBT_WEBUI_PORT
+              value: {{ .Values.service.port | quote }}
+            - name: QBT_CONFIG_PATH
+              value: "/config"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          ######################################################################
+          volumeMounts:
+            - name: downloads
+              mountPath: "/downloads"
+              {{- if .Values.persistence.downloads.subPath }}
+              subPath: {{ .Values.persistence.downloads.subPath }}
+              {{- end }}
+            - name: config
+              mountPath: "/config"
+              {{- if .Values.persistence.config.subPath }}
+              subPath: {{ .Values.persistence.config.subPath }}
+              {{- end }}
+            {{- with .Values.volumeMounts }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+      ######################################################################
+      volumes:
+        {{/* downloads folder, if persistence use pvc, if not, empty dir (volatile) */}}
+        - name: downloads
+        {{- if .Values.persistence.downloads.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.downloads.existingClaim | default (printf "%s-downloads" (include "qbittorrentnox.fullname" .)) }}
+        {{- else }}
+          emptyDir: {}
+        {{- end -}}
+
+        {{/* config folder, if persistence use pvc, if not, empty dir (volatile) */}}
+        - name: config
+        {{- if .Values.persistence.config.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.config.existingClaim | default (printf "%s-config" (include "qbittorrentnox.fullname" .))  }}
+        {{- else }}
+          emptyDir: {}
+        {{- end -}}
+
+        {{/* if there are other volumes in values put them here */}}
+        {{- with .Values.volumes }}
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ######################################################################
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
